@@ -102,10 +102,12 @@ const CachedImage = React.createClass({
     componentWillUnmount() {
         this._isMounted = false;
         NetInfo.isConnected.removeEventListener('change', this.handleConnectivityChange);
+        this.removeFromDownloads()
     },
 
     componentWillReceiveProps(nextProps) {
         if (!_.isEqual(this.props.source, nextProps.source)) {
+            this.removeFromDownloads()
             this.processSource(nextProps.source);
         }
     },
@@ -114,6 +116,15 @@ const CachedImage = React.createClass({
         this.safeSetState({
             networkAvailable: isConnected
         });
+    },
+
+    removeFromDownloads() {
+      const url = _.get(this.props.source, ['uri'], null);
+
+      if (url) {
+          const options = _.pick(this.props, ['useQueryParamsInCacheKey', 'cacheGroup', 'cacheLocation']);
+          ImageCacheProvider.clearDownload(url, options);
+      }
     },
 
     processSource(source) {

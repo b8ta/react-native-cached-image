@@ -2,6 +2,7 @@
 
 const _ = require('lodash');
 
+const promiseRetry = require('promise-retry');
 const RNFetchBlob = require('react-native-fetch-blob').default;
 
 const {
@@ -15,6 +16,9 @@ const LOCATION = {
 
 const SHA1 = require("crypto-js/sha1");
 const URL = require('url-parse');
+const IMAGE_DOWNLOAD_TIMEOUT = 2 * 60 * 1000;
+const IMAGE_RETRY_BACKOFF_MIN = 100;
+const IMAGE_RETRY_BACKOFF_MAX = 60 * 1000;
 
 const defaultHeaders = {};
 const defaultImageTypes = ['png', 'jpeg', 'jpg', 'gif', 'bmp', 'tiff', 'tif'];
@@ -132,28 +136,35 @@ function downloadImage(fromUrl, toFile, headers = {}) {
     if (!_.has(activeDownloads, toFile)) {
         //Using a temporary file, if the download is accidentally interrupted, it will not produce a disabled file
         const tmpFile = toFile + '.tmp';
-        // create an active download for this file
-        activeDownloads[toFile] = new Promise((resolve, reject) => {
-            RNFetchBlob
-                .config({path: tmpFile})
-                .fetch('GET', fromUrl, headers)
-                .then(res => {
-                    if (Math.floor(res.respInfo.status / 100) !== 2) {
-                        throw new Error('Failed to successfully download image');
-                    }
-                    //The download is complete and rename the temporary file
-                    return fs.mv(tmpFile, toFile);
-                })
-                .then(() => resolve(toFile))
-                .catch(err => {
-                    return deleteFile(tmpFile)
-                        .then(() => reject(err));
-                })
-                .finally(() => {
-                    // cleanup
-                    delete activeDownloads[toFile];
-                });
-        });
+
+        activeDownloads[toFile] = promiseRetry(function (retry, number) {
+          return RNFetchBlob
+              .config({path: tmpFile, timeout: IMAGE_DOWNLOAD_TIMEOUT, followRedirect: false})
+              .fetch('GET', fromUrl, headers)
+              .then(res => {
+                  if (Math.floor(res.respInfo.status / 100) !== 2) {
+                      throw new Error('Failed to successfully download image');
+                  }
+                  //The download is complete and rename the temporary file
+                  return fs.mv(tmpFile, toFile).catch(Promise.resolve);
+              })
+              .then(() => {
+                  // cleanup
+                  deleteFile(tmpFile);
+                  delete activeDownloads[toFile];
+                  return toFile
+              })
+              .catch(err => {
+                if (_.has(activeDownloads, toFile)) {
+                  retry(err)
+                }
+              })
+        }, {
+          forever: true,
+          factor: 2,
+          minTimeout: IMAGE_RETRY_BACKOFF_MIN,
+          maxTimeout: IMAGE_RETRY_BACKOFF_MAX,
+        })
     }
     return activeDownloads[toFile];
 }
@@ -262,6 +273,16 @@ function cacheImage(url, options = defaultOptions, resolveHeaders = defaultResol
 }
 
 /**
+ * Deletes a URL from the active downloads to stop retrying.
+ * @param url
+ * @param options
+ */
+function clearDownload(url, options = defaultOptions) {
+    const filePath = getCachedImageFilePath(url, options);
+    delete activeDownloads[filePath];
+}
+
+/**
  * Delete the cached image corresponding to the given url and options.
  * @param url
  * @param options
@@ -353,6 +374,7 @@ module.exports = {
     getCachedImageFilePath,
     getCachedImagePath,
     cacheImage,
+    clearDownload,
     deleteCachedImage,
     cacheMultipleImages,
     deleteMultipleCachedImages,
