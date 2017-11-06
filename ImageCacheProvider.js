@@ -142,11 +142,24 @@ function downloadImage(fromUrl, toFile, headers = {}) {
               .config({path: tmpFile, timeout: IMAGE_DOWNLOAD_TIMEOUT, followRedirect: false})
               .fetch('GET', fromUrl, headers)
               .then(res => {
-                  if (Math.floor(res.respInfo.status / 100) !== 2) {
-                      throw new Error('Failed to successfully download image');
-                  }
-                  //The download is complete and rename the temporary file
-                  return fs.mv(tmpFile, toFile).catch(Promise.resolve);
+                if (res.respInfo.status === 304) {
+                  return Promise.resolve(toFile);
+                }
+                let status = Math.floor(res.respInfo.status / 100);
+                if (status !== 2) {
+                  return Promise.reject();
+                }
+
+                return RNFetchBlob.fs.stat(tmpFile)
+                  .then(fileStats => {
+                    // Verify if the content was fully downloaded!
+                    if (res.respInfo.headers['Content-Length'] && res.respInfo.headers['Content-Length'] != fileStats.size) {
+                      return Promise.reject();
+                    }
+
+                    // the download is complete and rename the temporary file
+                    return fs.mv(tmpFile, toFile);
+                });
               })
               .then(() => {
                   // cleanup
