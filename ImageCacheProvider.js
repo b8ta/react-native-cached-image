@@ -9,9 +9,10 @@ const {
     fs
 } = RNFetchBlob;
 
+const IMAGE_CACHE_VERSION = '2'
 const LOCATION = {
-    CACHE: fs.dirs.CacheDir + '/imagesCacheDir',
-    BUNDLE: fs.dirs.MainBundleDir + '/imagesCacheDir'
+    CACHE: fs.dirs.CacheDir + '/imagesCacheDir_' + IMAGE_CACHE_VERSION,
+    BUNDLE: fs.dirs.MainBundleDir + '/imagesCacheDir_' + IMAGE_CACHE_VERSION
 };
 
 const SHA1 = require("crypto-js/sha1");
